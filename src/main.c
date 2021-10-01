@@ -468,9 +468,9 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 			BT_GAP_SCAN_FAST_INTERVAL,
 			BT_GAP_SCAN_FAST_INTERVAL);
 
-			err = bt_conn_le_create(device_info->recv_info->addr, conn_params,
-				BT_LE_CONN_PARAM_DEFAULT,
-				&default_conn);
+	err = bt_conn_le_create(device_info->recv_info->addr, conn_params,
+		BT_LE_CONN_PARAM_DEFAULT,
+		&default_conn);
 
 	if (err) {
 		printk("Create conn failed (err %d)\n", err);
@@ -482,20 +482,19 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 		}
 	}
 
-	default_conn = bt_conn_ref(conn);
 	printk("Connection pending\n");
 }
 
-static void scan_connecting_error(struct bt_scan_device_info *device_info)
-{
-	LOG_WRN("Connecting failed");
-}
+// static void scan_connecting_error(struct bt_scan_device_info *device_info)
+// {
+// 	LOG_WRN("Connecting failed");
+// }
 
-static void scan_connecting(struct bt_scan_device_info *device_info,
-			    struct bt_conn *conn)
-{
-	default_conn = bt_conn_ref(conn);
-}
+// static void scan_connecting(struct bt_scan_device_info *device_info,
+// 			    struct bt_conn *conn)
+// {
+// 	default_conn = bt_conn_ref(conn);
+// }
 
 static int nus_client_init(void)
 {
