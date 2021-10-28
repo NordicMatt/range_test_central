@@ -66,6 +66,17 @@ static K_FIFO_DEFINE(fifo_uart_rx_data);
 static struct bt_conn *default_conn;
 static struct bt_nus_client nus_client;
 
+#define INTERVAL_MIN 0x140 /* 320 units, 400 ms */
+#define INTERVAL_MAX 0x140 /* 320 units, 400 ms */
+#define CONN_LATENCY 0
+
+#define MIN_CONN_INTERVAL   6
+#define MAX_CONN_INTERVAL   3200
+#define SUPERVISION_TIMEOUT 1000
+
+#define PHY_UPDATE_TIMEOUT K_SECONDS(20)
+static K_SEM_DEFINE(phy_update_sem, 0, 1);
+
 static void ble_data_sent(uint8_t err, const uint8_t *const data, uint16_t len)
 {
 	struct uart_data_t *buf;
@@ -299,6 +310,7 @@ static void discovery_complete(struct bt_gatt_dm *dm,
 	bt_nus_subscribe_receive(nus);
 
 	bt_gatt_dm_data_release(dm);
+
 }
 
 static void discovery_service_not_found(struct bt_conn *conn,
@@ -393,7 +405,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	if ((!err) && (err != -EALREADY)) {
 		LOG_ERR("Stop LE scan failed (err %d)", err);
 	}
-
+	
 	dk_set_led_on(CON_STATUS_LED);
 }
 
@@ -443,7 +455,7 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 static struct bt_conn_cb conn_callbacks = {
 	.connected = connected,
 	.disconnected = disconnected,
-	.security_changed = security_changed
+	.security_changed = security_changed,
 };
 
 static void scan_filter_match(struct bt_scan_device_info *device_info,
@@ -463,11 +475,13 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 	if (err) {
 		printk("Stop LE scan failed (err %d)\n", err);
 	}
+	
 	conn_params = BT_CONN_LE_CREATE_PARAM(
-			BT_CONN_LE_OPT_CODED | BT_CONN_LE_OPT_NO_1M,
+			BT_CONN_LE_PHY_OPT_NONE,
 			BT_GAP_SCAN_FAST_INTERVAL,
 			BT_GAP_SCAN_FAST_INTERVAL);
 
+	
 	err = bt_conn_le_create(device_info->recv_info->addr, conn_params,
 		BT_LE_CONN_PARAM_DEFAULT,
 		&default_conn);
@@ -484,17 +498,6 @@ static void scan_filter_match(struct bt_scan_device_info *device_info,
 
 	printk("Connection pending\n");
 }
-
-// static void scan_connecting_error(struct bt_scan_device_info *device_info)
-// {
-// 	LOG_WRN("Connecting failed");
-// }
-
-// static void scan_connecting(struct bt_scan_device_info *device_info,
-// 			    struct bt_conn *conn)
-// {
-// 	default_conn = bt_conn_ref(conn);
-// }
 
 static int nus_client_init(void)
 {
@@ -523,17 +526,14 @@ static int scan_init(void)
 {
 	int err;
 	
-
 	/* Use active scanning and disable duplicate filtering to handle any
 	 * devices that might update their advertising data at runtime. */
 	struct bt_le_scan_param scan_param = {
 		.type     = BT_LE_SCAN_TYPE_ACTIVE,
 		.interval = BT_GAP_SCAN_FAST_INTERVAL,
 		.window   = BT_GAP_SCAN_FAST_WINDOW,
-		.options  = BT_LE_SCAN_OPT_CODED | BT_LE_SCAN_OPT_NO_1M
+		.options  = BT_LE_SCAN_OPT_NONE
 	};
-
-	
 
 	struct bt_scan_init_param scan_init = {
 		.connect_if_match = 0,
