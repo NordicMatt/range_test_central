@@ -46,8 +46,9 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 #define DATA_STATUS_LED DK_LED1
 #define DATA_LED_BLINK_INTERVAL 1000
-
 #define CON_STATUS_LED DK_LED2
+
+static uint8_t blink_status = 0;
 
 static const struct device *uart;
 static struct k_work_delayable uart_work;
@@ -66,17 +67,6 @@ static K_FIFO_DEFINE(fifo_uart_rx_data);
 static struct bt_conn *default_conn;
 static struct bt_nus_client nus_client;
 
-#define INTERVAL_MIN 0x140 /* 320 units, 400 ms */
-#define INTERVAL_MAX 0x140 /* 320 units, 400 ms */
-#define CONN_LATENCY 0
-
-#define MIN_CONN_INTERVAL   6
-#define MAX_CONN_INTERVAL   3200
-#define SUPERVISION_TIMEOUT 1000
-
-#define PHY_UPDATE_TIMEOUT K_SECONDS(20)
-static K_SEM_DEFINE(phy_update_sem, 0, 1);
-
 static void ble_data_sent(uint8_t err, const uint8_t *const data, uint16_t len)
 {
 	struct uart_data_t *buf;
@@ -91,8 +81,6 @@ static void ble_data_sent(uint8_t err, const uint8_t *const data, uint16_t len)
 		LOG_WRN("ATT error code: 0x%02X", err);
 	}
 }
-
-static uint8_t blink_status = 0;
 
 static uint8_t ble_data_received(const uint8_t *const data, uint16_t len)
 {
@@ -134,7 +122,6 @@ static uint8_t ble_data_received(const uint8_t *const data, uint16_t len)
 	}
 
 	dk_set_led(DATA_STATUS_LED, (++blink_status) % 2);
-	// k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -310,7 +297,6 @@ static void discovery_complete(struct bt_gatt_dm *dm,
 	bt_nus_subscribe_receive(nus);
 
 	bt_gatt_dm_data_release(dm);
-
 }
 
 static void discovery_service_not_found(struct bt_conn *conn,
@@ -405,7 +391,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	if ((!err) && (err != -EALREADY)) {
 		LOG_ERR("Stop LE scan failed (err %d)", err);
 	}
-	
+
 	dk_set_led_on(CON_STATUS_LED);
 }
 
@@ -455,48 +441,30 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 static struct bt_conn_cb conn_callbacks = {
 	.connected = connected,
 	.disconnected = disconnected,
-	.security_changed = security_changed,
+	.security_changed = security_changed
 };
 
 static void scan_filter_match(struct bt_scan_device_info *device_info,
 			      struct bt_scan_filter_match *filter_match,
 			      bool connectable)
 {
-	int err;
 	char addr[BT_ADDR_LE_STR_LEN];
-	struct bt_conn_le_create_param *conn_params;
 
 	bt_addr_le_to_str(device_info->recv_info->addr, addr, sizeof(addr));
 
 	LOG_INF("Filters matched. Address: %s connectable: %d",
 		log_strdup(addr), connectable);
+}
 
-	err = bt_scan_stop();
-	if (err) {
-		printk("Stop LE scan failed (err %d)\n", err);
-	}
-	
-	conn_params = BT_CONN_LE_CREATE_PARAM(
-			BT_CONN_LE_PHY_OPT_NONE,
-			BT_GAP_SCAN_FAST_INTERVAL,
-			BT_GAP_SCAN_FAST_INTERVAL);
+static void scan_connecting_error(struct bt_scan_device_info *device_info)
+{
+	LOG_WRN("Connecting failed");
+}
 
-	
-	err = bt_conn_le_create(device_info->recv_info->addr, conn_params,
-		BT_LE_CONN_PARAM_DEFAULT,
-		&default_conn);
-
-	if (err) {
-		printk("Create conn failed (err %d)\n", err);
-
-		err = bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE);
-		if (err) {
-			printk("Scanning failed to start (err %d)\n", err);
-			return;
-		}
-	}
-
-	printk("Connection pending\n");
+static void scan_connecting(struct bt_scan_device_info *device_info,
+			    struct bt_conn *conn)
+{
+	default_conn = bt_conn_ref(conn);
 }
 
 static int nus_client_init(void)
@@ -520,25 +488,13 @@ static int nus_client_init(void)
 }
 
 BT_SCAN_CB_INIT(scan_cb, scan_filter_match, NULL,
-		NULL, NULL);
+		scan_connecting_error, scan_connecting);
 
 static int scan_init(void)
 {
 	int err;
-	
-	/* Use active scanning and disable duplicate filtering to handle any
-	 * devices that might update their advertising data at runtime. */
-	struct bt_le_scan_param scan_param = {
-		.type     = BT_LE_SCAN_TYPE_ACTIVE,
-		.interval = BT_GAP_SCAN_FAST_INTERVAL,
-		.window   = BT_GAP_SCAN_FAST_WINDOW,
-		.options  = BT_LE_SCAN_OPT_NONE
-	};
-
 	struct bt_scan_init_param scan_init = {
-		.connect_if_match = 0,
-		.scan_param = &scan_param,
-		.conn_param = NULL
+		.connect_if_match = 1,
 	};
 
 	bt_scan_init(&scan_init);
