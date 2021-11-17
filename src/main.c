@@ -29,6 +29,8 @@
 
 #include <drivers/uart.h>
 
+#include <stdio.h>
+
 #include <logging/log.h>
 
 #define LOG_MODULE_NAME central_uart
@@ -40,7 +42,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define KEY_PASSKEY_ACCEPT DK_BTN1_MSK
 #define KEY_PASSKEY_REJECT DK_BTN2_MSK
 
-#define NUS_WRITE_TIMEOUT K_MSEC(150)
+#define NUS_WRITE_TIMEOUT K_MSEC(1000)
 #define UART_WAIT_FOR_BUF_DELAY K_MSEC(50)
 #define UART_RX_TIMEOUT 50
 
@@ -63,6 +65,8 @@ struct uart_data_t {
 
 static K_FIFO_DEFINE(fifo_uart_tx_data);
 static K_FIFO_DEFINE(fifo_uart_rx_data);
+
+static K_SEM_DEFINE(ble_ready_for_data, 0, 1);
 
 static struct bt_conn *default_conn;
 static struct bt_nus_client nus_client;
@@ -297,6 +301,8 @@ static void discovery_complete(struct bt_gatt_dm *dm,
 	bt_nus_subscribe_receive(nus);
 
 	bt_gatt_dm_data_release(dm);
+	
+	k_sem_give(&ble_ready_for_data);
 }
 
 static void discovery_service_not_found(struct bt_conn *conn,
@@ -378,6 +384,7 @@ static void connected(struct bt_conn *conn, uint8_t conn_err)
 	err = bt_gatt_exchange_mtu(conn, &exchange_params);
 	if (err) {
 		LOG_WRN("MTU exchange failed (err %d)", err);
+
 	}
 
 	err = bt_conn_set_security(conn, BT_SECURITY_L2);
@@ -430,12 +437,15 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 	if (!err) {
 		LOG_INF("Security changed: %s level %u", log_strdup(addr),
 			level);
+
+		gatt_discover(conn);
+		
 	} else {
 		LOG_WRN("Security failed: %s level %u err %d", log_strdup(addr),
 			level, err);
 	}
 
-	gatt_discover(conn);
+	// gatt_discover(conn);
 }
 
 static struct bt_conn_cb conn_callbacks = {
@@ -645,3 +655,26 @@ void main(void)
 		}
 	}
 }
+
+
+void ble_range_test_thread(void)
+{
+
+	//k_sem_take(&ble_ready_for_data, K_FOREVER);
+
+	for(;;){
+		
+		
+		k_sem_take(&ble_ready_for_data, K_FOREVER);
+
+		struct uart_data_t *data = k_malloc(sizeof(*data));
+		data->len = sprintf(data->data, "Ready");
+
+		k_fifo_put(&fifo_uart_rx_data, data);
+
+		LOG_INF("Sent Ready");
+	}
+}
+
+K_THREAD_DEFINE(ble_range_test_thread_id, 1024, ble_range_test_thread, NULL, NULL,
+		NULL, 13, 0, 0);
